@@ -1,0 +1,329 @@
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <title>Hyperlapse controller</title>
+  <script src="jQuery.js"></script>
+  <script src="lib.js"></script>
+
+  <link rel="stylesheet" href="bootstrap.css">
+</head>
+<body>
+
+  <div hidden id="loading" class="text-center pt-5" style="position: absolute; height: 100%; width: 100%; background: rgba(255,255,255,.8);">
+    <img class="mt-5" src="loading.gif" alt="loading">
+  </div>
+
+  <div class="p-4">
+
+  <div class="mb-1">
+    <span id="status-display" class="w-100 btn btn-danger">Not Running</span>
+  </div>
+
+  <div class="mb-4 d-flex justify-content-around">
+    <button id="btn-update-status" class="w-100 btn">Update</button>
+    <button id="btn-stop" class="w-100 btn btn-danger">Stop</button>
+  </div>
+
+  <!-- nav -->
+  <div class="d-flex justify-content-around">
+    <!-- <button class="btn-tab btn btn-info w-100" value="curve">Path</button> -->
+    <button class="btn-tab btn btn-info w-100" value="camera">Pan/Tilt</button>
+    <button class="btn-tab btn btn-primary w-100" value="settings">Timelapse</button>
+  </div>
+
+  <div>
+    <!-- curve -->
+    <div id="curve" class="tab">
+      <canvas id="curve-canvas" style="width: 100%; height: 600px;"></canvas>
+    </div>
+
+    <!-- camera pan -->
+    <div id="camera" class="tab" >
+      <canvas id="camera-canvas" style="width: 100%; height: 600px;"></canvas>
+    </div>
+
+    <!-- timelapse settings -->
+    <div id="settings" class="tab pt-5">
+      <span>Max Speed ~4.32 mm/s</span><br>
+      <span>Speed ~<span id="speed-display">0</span> mm/s</span>
+      <div class="form-group">
+        <label>Length (min)</label>
+        <input class="form-control" type="number" id="input_time">
+      </div>
+
+      <div class="form-group">
+          <label>Distance (cm)</label>
+          <input class="form-control" type="number" id="input_distance">
+      </div>
+  
+      <div class="form-group">
+        <label>Direction (<span id="input_direction_display">0</span>)</label>
+        <input class="form-control" type="range" id="input_direction" min="-90" max="90">
+      </div>
+
+      <label>Reverse</label><input id="input-reversed" type="checkbox">
+
+
+
+      
+      <!-- <div class="form-group">
+        <label>Exponential</label>
+        <input type="checkbox">
+      </div>
+
+      <div class="form-group">
+        <label>Exponential Base</label>
+        <input class="form-control" type="number">
+      </div> -->
+
+      <div class="text-right">
+        <button id="btn-submit" class="btn btn-primary">Start</button>
+      </div>
+    </div>
+  </div>
+
+  </div>
+
+</body>
+
+<script>
+let changePage = function(page) {
+  $(".tab").attr('hidden', '');
+  $(`#${page}`).removeAttr('hidden');
+}
+
+$(function() {
+
+  let updateStatus = function () {
+    $.ajax({
+      url: '/api/status.php',
+      type: 'GET',
+      dataType: 'JSON'
+    }).done(r => {  
+      let $display = $("#status-display");
+      $display.removeClass(["btn-success", "btn-danger"]).text("");
+      if (r.active) {
+        $display.addClass("btn-success");
+        $display.text(r.message);
+      } else {
+        $display.addClass("btn-danger");
+        $display.text("Not Running");
+      }
+    });
+  }
+
+  $("#input_time").on('keyup', e => {
+    console.log(e.target.value);
+    updateSpeed ();
+  });
+
+  $("#input_distance").on('keyup', e => {
+    console.log(e.target.value);
+    updateSpeed ();
+
+  });
+
+  let updateSpeed = function () {
+    let length = parseInt($("#input_time").val());
+    let distance = parseInt($("#input_distance").val()) / 10;
+    $("#speed-display").text(distance / length);
+    console.log(distance / length);
+  }
+
+  $("#btn-stop").on('click', e => {
+    $.ajax({
+      url: '/api/stop.php',
+      type: 'GET',
+    }).done(r => {
+      updateStatus ();
+    });
+  });
+
+  $("#btn-update-status").on('click', e => updateStatus ());
+
+  updateStatus ();
+
+  let settings = {start_pan:0,end_pan:0,start_tilt:0,end_tilt:0};
+
+  $(".btn-tab").on('click', e => {
+    changePage(e.target.value);
+    $(".btn-tab").removeClass("btn-info").addClass("btn-primary");
+    $(e.target).removeClass("btn-primary").addClass("btn-info");
+  });
+
+  $("#input_direction").on('input', e => {
+    let dir = e.target.value;
+    $("#input_direction_display").text(dir);
+  });
+
+  $("#btn-submit").on('click', e => {
+    $("#loading").removeAttr('hidden');
+    settings.time = parseInt($("#input_time").val());
+    settings.distance = parseInt($("#input_distance").val());
+    settings.direction = parseInt($("#input_direction").val());
+    settings.reversed = $("#input-reversed").is(":checked")
+    console.log(settings);
+    $.ajax({
+      url: '/api/start.php',
+      type: 'GET',
+      data: settings
+    }).done(r => {  
+      $("#loading").attr('hidden', '');
+      setTimeout(_ => {
+        updateStatus ();
+      }, 1000)
+    });
+  });
+
+
+  // Curve
+  function initCurve() {
+    let curveCanvas = new Canvas('curve-canvas');
+    let midWidth = curveCanvas.canvas.width / 2;
+    let midHeight = curveCanvas.canvas.height / 2;
+    let start = new Point(midWidth, midHeight + (midHeight * .5), curveCanvas);
+    let ctrl1 = new Point(midWidth, midHeight, curveCanvas);
+    let end   = new Point(midWidth,  midHeight - (midHeight * .5), curveCanvas);
+    let ctrl2 = new Point(midWidth - 60, midHeight, curveCanvas);
+    let curve = new Curve(start, end, ctrl1, ctrl2, curveCanvas);
+    let distLine = new Line(start, end, curveCanvas);
+    distLine.style = [5,15]
+    let distLineText = new Text(curveCanvas);
+    distLineText.pos(_ => {
+      let x = ((start.x + end.x) / 2) + 20;
+      let y = (start.y + end.y) / 2;
+      return {x, y};
+    });
+    distLineText.text(_ => {
+      let dist = Math.hypot(start.x - end.x, start.y - end.y);
+      return parseFloat(dist / 240).toFixed(2) + 'm';
+    }); 
+    curveCanvas.render();
+  }
+
+  function initPan() {
+    let cameraCanvas = new Canvas('camera-canvas');
+
+    let cameraSize = 5;
+    let cameraWidth = 16 * cameraSize;
+    let cameraHeight = 9 * cameraSize;
+
+    let midWidth = cameraCanvas.canvas.width / 2;
+    let midHeight = cameraCanvas.canvas.height / 2;
+
+    
+    let middleSquare = new Square({x: midWidth, y: midHeight}, cameraWidth, cameraHeight, cameraCanvas);
+    
+    let startAnchor = new Point(midWidth, midHeight, cameraCanvas);
+    let startSquare = new Square(startAnchor, cameraWidth, cameraHeight, cameraCanvas);
+    let startText = new Text(cameraCanvas);
+    startText.text(_ => "Start");
+    startText.color = "green";
+    startText.pos(_ => {
+      return {x: startAnchor.x + 5, y: startAnchor.y - 30};
+    });
+    
+    let endAnchor = new Point(midWidth, midHeight, cameraCanvas);
+    let endSquare = new Square(endAnchor, cameraWidth, cameraHeight, cameraCanvas);
+    let endText = new Text(cameraCanvas);
+    endText.color = "Red";
+    endText.text(_ => "End");
+    endText.pos(_ => {
+      return {x: endAnchor.x- 40, y: endAnchor.y - 30};
+    });
+
+    endAnchor.onDrag((x, y) => {
+      let pan = Math.round((endAnchor.x - midWidth) / 2);
+      let tilt = Math.round(-1*(endAnchor.y - midHeight)/2);
+      settings.end_pan = pan;
+      settings.end_tilt = tilt;
+    });
+
+    // Update real robot
+    let updating = false
+    startAnchor.onDrag((x, y) => {
+      let pan = Math.round((startAnchor.x - midWidth) / 2);
+      let tilt = Math.round(-1*(startAnchor.y - midHeight)/2);
+      settings.start_pan = pan;
+      settings.start_tilt = tilt;
+      if (updating) return;
+      updating = true;
+      $.ajax({
+        url: "/api/goto.php",
+        type: "GET",
+        data: {pan, tilt}
+      }).done(_ => updating = false);
+    });
+
+    let startPan = new Line({x:100, y:50}, {x:120, y:120}, cameraCanvas);
+    startPan.color = "green";
+    startPan.pos((start, end) => 
+      createAngle (start, 10, -1 * (startAnchor.x - midWidth))
+    );
+
+    let endPan = new Line({x:100, y:50}, {x:120, y:120}, cameraCanvas);
+    endPan.color = "red";
+    endPan.pos((start, end) => 
+      createAngle (start, 10, -1 * (endAnchor.x - midWidth))
+    );
+
+    let startTilt = new Line({x:200, y:50}, {x:120, y:120}, cameraCanvas);
+    startTilt.color = "green";
+    startTilt.pos((start, end) => 
+      createAngle (start, 10, (startAnchor.y - midHeight)/2 + 90)
+    );
+
+    let endTilt = new Line({x:200, y:50}, {x:120, y:120}, cameraCanvas);
+    endTilt.color = "red";
+    endTilt.pos((start, end) => 
+      createAngle (start, 10, (endAnchor.y - midHeight)/2 + 90)
+    );
+
+    let tiltText = new Text(cameraCanvas);
+    tiltText.pos(_ => ({x:170, y:100}));
+    tiltText.size = 15;
+    tiltText.text(_ => {
+      let start = Math.round(-1*(startAnchor.y - midHeight)/2);
+      let end   = Math.round(-1*(endAnchor.y - midHeight)/2);
+      return `Tilt ${start}° to ${end}°`;
+    });
+
+    let panText = new Text(cameraCanvas);
+    panText.pos(_ => ({x:40, y:100}));
+    panText.size = 15;
+    panText.text(_ => {
+      let start = Math.round((startAnchor.x - midWidth) / 2);
+      let end   = Math.round((endAnchor.x - midWidth) / 2);
+      return `Pan ${start}° to ${end}°`;
+    });
+
+    function createAngle(start, length, theta) {
+      let r = 30;
+      let theta_r = (theta+180) * Math.PI / 180;
+      let yDiff = r * Math.cos(theta_r);
+      let xDiff = r * Math.sin(theta_r);
+      let newEnd = {
+        x: start.x + xDiff,
+        y: start.y + yDiff
+      };
+      return {start, end: newEnd};
+    }
+
+    let cameraDiff = new Line(startAnchor, endAnchor, cameraCanvas);
+    cameraDiff.style = [5,15];
+  }
+
+  initCurve();
+  initPan();
+
+  changePage("camera");
+
+
+});
+
+
+
+</script>
+</html>
